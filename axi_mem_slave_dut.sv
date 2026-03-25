@@ -2,7 +2,7 @@ module axi_mem_slave_dut #(
   parameter ADDR_W     = 32,
   parameter DATA_W     = 32,
   parameter ID_W       = 4,
-  parameter DEPTH      = 65536,
+  parameter DEPTH      = 65536, //2^16
   parameter RD_Q_DEPTH = 8
 )(
   axi_if.SLV axi
