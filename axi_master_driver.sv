@@ -90,7 +90,7 @@ class axi_master_driver extends uvm_driver #(axi_txn);
     forever begin
       wait (aw_q.size() > 0);
       tr = aw_q.pop_front();
-	  repeat ($urandom_range(0,2)) @(vif.drv_cb);
+      repeat ($urandom_range(0,2)) @(vif.drv_cb);
       vif.drv_cb.AWID    <= tr.id;
       vif.drv_cb.AWADDR  <= tr.addr;
       vif.drv_cb.AWLEN   <= tr.len;
@@ -170,4 +170,5 @@ class axi_master_driver extends uvm_driver #(axi_txn);
       end
     end
   endtask
+
 endclass

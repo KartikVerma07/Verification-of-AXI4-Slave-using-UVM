@@ -2,16 +2,20 @@ class axi_master_monitor extends uvm_component;
   `uvm_component_utils(axi_master_monitor)
 
   virtual axi_if vif;
-  uvm_analysis_port #(axi_txn) txn_ap;
 
-  axi_txn pending_aw_q[$];
-  axi_txn pending_w_q[$];
-  axi_txn pending_ar_q_by_id[16][$];
-  axi_txn active_r_by_id[16];
+  uvm_analysis_port #(axi_txn) aw_ap;
+  uvm_analysis_port #(axi_txn) w_ap;
+  uvm_analysis_port #(axi_txn) b_ap;
+  uvm_analysis_port #(axi_txn) ar_ap;
+  uvm_analysis_port #(axi_txn) r_ap;
 
   function new(string name, uvm_component parent);
     super.new(name, parent);
-    txn_ap = new("txn_ap", this);
+    aw_ap = new("aw_ap", this);
+    w_ap  = new("w_ap",  this);
+    b_ap  = new("b_ap",  this);
+    ar_ap = new("ar_ap", this);
+    r_ap  = new("r_ap",  this);
   endfunction
 
   function void build_phase(uvm_phase phase);
@@ -27,7 +31,7 @@ class axi_master_monitor extends uvm_component;
       collect_b();
       collect_ar();
       collect_r();
-    join
+    join_none
   endtask
 
   task collect_aw();
@@ -35,35 +39,39 @@ class axi_master_monitor extends uvm_component;
     forever begin
       @(vif.mon_cb);
       if (vif.mon_cb.AWVALID && vif.mon_cb.AWREADY) begin
-        tr = axi_txn::type_id::create("aw_tr");
+        tr          = axi_txn::type_id::create("aw_tr");
         tr.is_write = 1'b1;
         tr.id       = vif.mon_cb.AWID;
         tr.addr     = vif.mon_cb.AWADDR;
         tr.len      = vif.mon_cb.AWLEN;
         tr.size     = vif.mon_cb.AWSIZE;
         tr.burst    = vif.mon_cb.AWBURST;
-        pending_aw_q.push_back(tr);
+        aw_ap.write(tr);
+        `uvm_info(get_type_name(),
+                  $sformatf("MON AW id=%0d addr=0x%08h len=%0d", tr.id, tr.addr, tr.len),
+                  UVM_HIGH)
       end
     end
   endtask
 
+  // AXI4 has no WID, W bursts are matched to AW in order globally
   task collect_w();
     axi_txn tr;
     forever begin
-      wait (pending_aw_q.size() > 0);
-      tr = axi_txn::type_id::create("w_tr");
-      tr.copy(pending_aw_q[0]);
-      tr.data_q.delete();
-      forever begin
-        @(vif.mon_cb);
-        if (vif.mon_cb.WVALID && vif.mon_cb.WREADY) begin
-          tr.data_q.push_back(vif.mon_cb.WDATA);
-          if (vif.mon_cb.WLAST) begin
-            void'(pending_aw_q.pop_front());
-            pending_w_q.push_back(tr);
-            break;
-          end
+      @(vif.mon_cb);
+      if (vif.mon_cb.WVALID && vif.mon_cb.WREADY) begin
+        tr          = axi_txn::type_id::create("w_tr");
+        tr.is_write = 1'b1;
+        tr.data_q.push_back(vif.mon_cb.WDATA);
+        while (!vif.mon_cb.WLAST) begin
+          @(vif.mon_cb);
+          if (vif.mon_cb.WVALID && vif.mon_cb.WREADY)
+            tr.data_q.push_back(vif.mon_cb.WDATA);
         end
+        w_ap.write(tr);
+        `uvm_info(get_type_name(),
+                  $sformatf("MON W beats=%0d", tr.data_q.size()),
+                  UVM_HIGH)
       end
     end
   endtask
@@ -73,17 +81,14 @@ class axi_master_monitor extends uvm_component;
     forever begin
       @(vif.mon_cb);
       if (vif.mon_cb.BVALID && vif.mon_cb.BREADY) begin
-        if (pending_w_q.size() == 0) begin
-          `uvm_warning(get_type_name(), "B seen with no pending write txn")
-        end
-        else begin
-          tr = pending_w_q.pop_front();
-          tr.resp_q.push_back(vif.mon_cb.BRESP);
-          txn_ap.write(tr);
-          `uvm_info(get_type_name(),
-                    $sformatf("MON WRITE complete id=%0d addr=0x%08h beats=%0d", tr.id, tr.addr, tr.num_beats()),
-                    UVM_HIGH)
-        end
+        tr          = axi_txn::type_id::create("b_tr");
+        tr.is_write = 1'b1;
+        tr.id       = vif.mon_cb.BID;
+        tr.resp_q.push_back(vif.mon_cb.BRESP);
+        b_ap.write(tr);
+        `uvm_info(get_type_name(),
+                  $sformatf("MON B id=%0d resp=0x%0h", tr.id, vif.mon_cb.BRESP),
+                  UVM_HIGH)
       end
     end
   endtask
@@ -93,51 +98,44 @@ class axi_master_monitor extends uvm_component;
     forever begin
       @(vif.mon_cb);
       if (vif.mon_cb.ARVALID && vif.mon_cb.ARREADY) begin
-        tr = axi_txn::type_id::create("ar_tr");
+        tr          = axi_txn::type_id::create("ar_tr");
         tr.is_write = 1'b0;
         tr.id       = vif.mon_cb.ARID;
         tr.addr     = vif.mon_cb.ARADDR;
         tr.len      = vif.mon_cb.ARLEN;
         tr.size     = vif.mon_cb.ARSIZE;
         tr.burst    = vif.mon_cb.ARBURST;
-        pending_ar_q_by_id[int'(tr.id)].push_back(tr);
+        ar_ap.write(tr);
+        `uvm_info(get_type_name(),
+                  $sformatf("MON AR id=%0d addr=0x%08h len=%0d", tr.id, tr.addr, tr.len),
+                  UVM_HIGH)
       end
     end
   endtask
 
   task collect_r();
-    axi_txn tr;
+    axi_txn active_r[int];
     int idx;
     forever begin
       @(vif.mon_cb);
       if (vif.mon_cb.RVALID && vif.mon_cb.RREADY) begin
         idx = int'(vif.mon_cb.RID);
-        if (active_r_by_id[idx] == null) begin
-          if (pending_ar_q_by_id[idx].size() == 0) begin
-            `uvm_warning(get_type_name(), $sformatf("R seen for RID=%0d with no pending AR", idx))
-          end
-          else begin
-            active_r_by_id[idx] = pending_ar_q_by_id[idx].pop_front();
-            // make sure rdata_q and resp_q are empty before filling in data in coming if statement
-            active_r_by_id[idx].rdata_q.delete();
-            active_r_by_id[idx].resp_q.delete();
-          end
+        if (!active_r.exists(idx)) begin
+          active_r[idx]          = axi_txn::type_id::create("r_tr");
+          active_r[idx].is_write = 1'b0;
+          active_r[idx].id       = vif.mon_cb.RID;
         end
-
-        if (active_r_by_id[idx] != null) begin
-          active_r_by_id[idx].rdata_q.push_back(vif.mon_cb.RDATA);
-          active_r_by_id[idx].resp_q.push_back(vif.mon_cb.RRESP);
-          if (vif.mon_cb.RLAST) begin
-            tr = active_r_by_id[idx];
-            txn_ap.write(tr);
-            `uvm_info(get_type_name(),
-                      $sformatf("MON READ complete id=%0d addr=0x%08h beats=%0d", tr.id, tr.addr, tr.rdata_q.size()),
-                      UVM_HIGH)
-            active_r_by_id[idx] = null;
-            // burst is now complete, so the monitor is ready for the next read response with the same ID.
-          end
+        active_r[idx].rdata_q.push_back(vif.mon_cb.RDATA);
+        active_r[idx].resp_q.push_back(vif.mon_cb.RRESP);
+        if (vif.mon_cb.RLAST) begin
+          r_ap.write(active_r[idx]);
+          `uvm_info(get_type_name(),
+                    $sformatf("MON R id=%0d beats=%0d", idx, active_r[idx].rdata_q.size()),
+                    UVM_HIGH)
+          active_r.delete(idx);
         end
       end
     end
   endtask
+
 endclass
