@@ -23,7 +23,7 @@ The purpose of this project was to understand:
 - how burst transfers are driven and monitored
 - how multiple outstanding reads are tracked
 - how IDs are used for out-of-order read completion
-- how to reconstruct full AXI transactions in the monitor
+- how to reconstruct full AXI transactions in the scoreboard
 - how to compare DUT results against a reference memory model in the scoreboard
 
 ---
